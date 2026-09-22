@@ -122,10 +122,25 @@ judgments already made without re-running any inference.
 
 ## Known rough edges
 
-- **Open questions ramble.** "what can you do?" gets `i can help you with things
-  including like some stuff and else`. The stop option is competing against 20 group
-  winners and rarely wins outright; a dedicated "is this reply complete?" Noul
-  weighted against it would read better than making it one option among many.
+- **Open questions ramble**, and the obvious fix does not work. "what can you do?"
+  gets `i can help you anything with in everything`: the first three or four words
+  are good and the rest is filler.
+
+  The natural fix is a dedicated "is this reply complete?" Noul, asked separately
+  instead of letting `<end of reply>` compete as one entry against 250 words. Built
+  it, swept the threshold over five prompts, and **reverted it**. Mean length fell
+  from 7.7 words to 5.0, but the wins and losses cancelled: `do you like music?`
+  stayed `i like music`, while `tell me about yourself` was truncated from
+  `hello im a assistant helpful and friendly` to `hello im assistant`, and
+  `thanks for the help!` went from `you are welcome` to `anytime again`. The prompt
+  that motivated it rambled at every threshold tried.
+
+  So the stop signal was not the bottleneck. Once the sentence reaches `i can help
+  you`, the best remaining word by meaning x grammar squared genuinely is filler, and
+  nothing in the design prefers stopping to padding. A real fix probably has to score
+  the whole candidate sentence rather than the next word - which is a different
+  architecture, not a tuning change. Recorded here so the next person does not spend
+  the same hour rediscovering it.
 - **It is slow by design.** Roughly 1.2s per word, so a ten-word reply takes twelve
   seconds. The words stream as they are decided, and watching the search is most of
   the point.
