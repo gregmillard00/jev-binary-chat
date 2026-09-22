@@ -87,12 +87,39 @@ KEEP_SHORT = {
 }
 
 
+# WORDS THIS DEMO WILL NOT SAY (2026-09-22).
+#
+# Max is posting this on LinkedIn under his own name. google-10000-english is a scrape
+# of web text, and its top 5,000 carries 32 words I would not want appearing in a reply
+# on a post a colleague is sharing professionally - including fuck, rape, porn and a
+# cluster of SEO spam (viagra, casino, xxx).
+#
+# The risk is not hypothetical for THIS design specifically. Every word is chosen as
+# the most natural continuation of the visitor's own message, so a crude prompt steers
+# the search directly at the crude end of the dictionary. A generative model would at
+# least have been trained to decline; this thing only knows which word fits.
+#
+# WHAT IS DELIBERATELY NOT HERE, because over-filtering is its own failure: gay and
+# lesbian are ordinary words and removing them as though they were profanity would be
+# worse than the problem. So are death, die, kill, murder, hate, drug and stupid - a
+# chat demo that cannot say "die" is broken, not safe. The line drawn is sexual and
+# scatological content plus scrape spam, not unpleasant subject matter.
+DENY = {
+    "anal", "ass", "asses", "asshole", "bastard", "bitch", "bitches", "boobs", "cock",
+    "cunt", "dick", "erotic", "escort", "fag", "faggot", "fuck", "fucked", "fucking",
+    "horny", "naked", "nigger", "nude", "orgasm", "piss", "porn", "porno", "rape",
+    "retard", "retarded", "sex", "sexy", "shit", "shitty", "slut", "tits", "whore",
+    "xxx", "casino", "gambling", "viagra",
+}
+
+
 def _load_vocab():
     with open(os.path.join(HERE, "data", "vocab.json")) as fh:
         data = json.load(fh)
     rank = data["rank"]
     words = sorted(data["words"], key=lambda w: rank[w])
     words = [w for w in words if len(w) > 2 or w in KEEP_SHORT]
+    words = [w for w in words if w not in DENY]
     return words[:VOCAB_SIZE]
 
 

@@ -31,7 +31,8 @@ import threading
 import time
 from collections import defaultdict, deque
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import (Flask, Response, jsonify, make_response, render_template,
+                   request)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -112,8 +113,20 @@ def _headers(resp):
 
 @app.route("/")
 def index():
-    return render_template("index.html", vocab=len(engine.VOCAB),
-                           groups=len(engine.GROUPS), group_size=engine.GROUP_SIZE)
+    # NO-STORE ON THE HTML (2026-09-22). Cloudflare was serving a cached copy of this
+    # page: the origin had the new contact footer and https://jev.pl-labs.net did not,
+    # four matches against zero. Checking only the public URL would have had me
+    # debugging an app that was already correct.
+    #
+    # It matters more than a stale footer. This page is about to be posted publicly, and
+    # a cached copy means any correction I make between now and then - wording, contacts,
+    # anything user-visible - silently does not reach the people reading it. The API
+    # responses were never affected, because the vocabulary filter is server-side.
+    resp = make_response(render_template(
+        "index.html", vocab=len(engine.VOCAB),
+        groups=len(engine.GROUPS), group_size=engine.GROUP_SIZE))
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @app.route("/healthz")
