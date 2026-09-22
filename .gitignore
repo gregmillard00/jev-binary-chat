@@ -5,3 +5,4 @@ venv/
 .run.pid
 *.log
 state/
+usage.jsonl

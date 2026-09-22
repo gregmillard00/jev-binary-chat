@@ -43,6 +43,7 @@ for line in open(os.path.join(HERE, ".env")) if os.path.exists(os.path.join(HERE
         k, _, v = line.partition("=")
         os.environ.setdefault(k.strip(), v.strip())
 
+import analytics                                                     # noqa: E402
 import engine                                                        # noqa: E402
 
 app = Flask(__name__)
@@ -126,6 +127,7 @@ def index():
         "index.html", vocab=len(engine.VOCAB),
         groups=len(engine.GROUPS), group_size=engine.GROUP_SIZE))
     resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    analytics.record("view", _client_ip())
     return resp
 
 
@@ -140,6 +142,7 @@ def reply():
     ip = _client_ip()
     limited = _rate_limited(ip)
     if limited:
+        analytics.record("refused", ip, why=limited[:40])
         return jsonify({"error": limited}), 429
 
     payload = request.get_json(silent=True) or {}
@@ -149,13 +152,23 @@ def reply():
 
     def stream():
         yield "retry: 10000\n\n"
+        # Counted here rather than per word: one reply is one thing a person did, and
+        # the cost of it is the sum. Never records what they typed - see analytics.py.
+        words = requests = tokens = 0
         try:
             for step in engine.compose(turns):
+                words = max(words, len((step.get("reply") or "").split()))
+                requests += step.get("requests", 0)
+                tokens += step.get("input_tokens", 0)
                 yield "data: %s\n\n" % json.dumps(step)
+            analytics.record("reply", ip, words=words, requests=requests,
+                             input_tokens=tokens)
         except engine.EngineError as exc:
+            analytics.record("error", ip, requests=requests, input_tokens=tokens)
             yield "data: %s\n\n" % json.dumps({"error": str(exc), "stop": True})
         except Exception:                                            # noqa: BLE001
             # Never leak a traceback to a public page.
+            analytics.record("error", ip, requests=requests, input_tokens=tokens)
             print("unexpected engine failure", file=sys.stderr, flush=True)
             yield "data: %s\n\n" % json.dumps(
                 {"error": "something went wrong on the server", "stop": True})
