@@ -31,6 +31,20 @@ LOG = os.environ.get("JEV_USAGE_LOG", os.path.join(HERE, "usage.jsonl"))
 # jev-1.13.0: $42 per billion input tokens, output free (docs/models).
 USD_PER_INPUT_TOKEN = 42 / 1e9
 
+# OUR OWN TRAFFIC IS NOT TRAFFIC (2026-09-22).
+#
+# 103 of the first 107 recorded "page views" came from this box: my own curl tests and a
+# watcher that had been polling the page every 60 seconds. Every request originating here
+# leaves through one egress IP, so they all collapse to a single pseudonym and look like
+# one extremely enthusiastic visitor. The real number on launch day was THREE people.
+#
+# That is not a rounding error, it is the difference between a report that flatters and
+# one that is true, on the first day of something a colleague put his name to. Set
+# JEV_IGNORE_IPS to a comma-separated list; the unit sets it to this host's egress
+# address. Loopback is always ignored.
+IGNORE_IPS = {"127.0.0.1", "::1", "localhost"}
+IGNORE_IPS |= {x.strip() for x in os.environ.get("JEV_IGNORE_IPS", "").split(",") if x.strip()}
+
 _lock = threading.Lock()
 _salt_day = None
 _salt = None
@@ -52,6 +66,8 @@ def _visitor(ip):
 def record(kind, ip, **fields):
     """Append one event. Never raises - analytics must not be able to break the site."""
     try:
+        if ip in IGNORE_IPS:
+            return
         row = {"t": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                "day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                "kind": kind, "v": _visitor(ip)}
