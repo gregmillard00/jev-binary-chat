@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talking to a model that cannot talk</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#232a34; --ink:#e6edf3;
+    --dim:#8b949e; --faint:#6e7681; --accent:#58a6ff; --warm:#f0883e; --good:#3fb950;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:26px}
+  h1{margin:0 0 8px;font-size:25px;letter-spacing:-.015em;font-weight:650}
+  .sub{color:var(--dim);max-width:70ch;margin:0}
+  .sub b{color:var(--ink);font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:22px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  #log{padding:18px;min-height:320px;max-height:56vh;overflow-y:auto}
+  .turn{margin-bottom:16px;display:flex;gap:11px}
+  .who{flex:0 0 42px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+       color:var(--faint);padding-top:4px}
+  .said{flex:1;white-space:pre-wrap;word-break:break-word}
+  .turn.jev .said{color:var(--ink)}
+  .cursor{display:inline-block;width:8px;height:1.05em;background:var(--accent);
+          vertical-align:-2px;animation:blink 1s steps(2) infinite;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+  form{display:flex;gap:10px;margin-top:16px}
+  input[type=text]{flex:1;background:var(--panel);border:1px solid var(--line);
+       color:var(--ink);border-radius:10px;padding:13px 15px;font:inherit}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  button{background:var(--accent);color:#06121f;border:0;border-radius:10px;
+         padding:13px 20px;font:inherit;font-weight:650;cursor:pointer}
+  button:disabled{opacity:.45;cursor:default}
+  .panel-h{padding:14px 16px;border-bottom:1px solid var(--line);font-size:12px;
+           text-transform:uppercase;letter-spacing:.07em;color:var(--faint)}
+  .panel-b{padding:16px}
+  .stat{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums;
+        padding:3px 0;color:var(--dim)}
+  .stat b{color:var(--ink);font-weight:600}
+  .bars{margin-top:14px}
+  .bar{margin-bottom:7px}
+  .bar .lbl{display:flex;justify-content:space-between;font-size:13px;
+            font-variant-numeric:tabular-nums}
+  .bar .lbl span:last-child{color:var(--faint)}
+  .bar .track{height:5px;background:#1d242e;border-radius:3px;margin-top:3px;overflow:hidden}
+  .bar .fill{height:100%;background:var(--accent);border-radius:3px}
+  .bar.won .lbl span:first-child{color:var(--good);font-weight:650}
+  .bar.won .fill{background:var(--good)}
+  .note{color:var(--faint);font-size:12.5px;line-height:1.55;margin-top:14px;
+        border-top:1px solid var(--line);padding-top:12px}
+  details{margin-top:26px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  summary{padding:14px 18px;cursor:pointer;font-weight:600}
+  .inner{padding:0 18px 18px;color:var(--dim);max-width:78ch}
+  .inner p{margin:.7em 0}
+  code{background:#1d242e;padding:1px 5px;border-radius:4px;font-size:.9em}
+  .err{color:var(--warm)}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+  .chip{background:#1d242e;border:1px solid var(--line);border-radius:999px;
+        padding:3px 10px;font-size:12px;color:var(--dim);cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Talking to a model that cannot talk</h1>
+    <p class="sub">
+      <b>Jev</b> does not generate text. It only returns typed judgments: a choice from a
+      fixed set, a yes/no probability, a score. So this page makes it write anyway. Every
+      word of every reply is chosen by a tournament over a
+      <b>{{ "{:,}".format(vocab) }}</b>-word dictionary: {{ groups }} groups of
+      {{ group_size }} compete in one request, then the {{ groups }} group winners compete
+      in a second. Two requests per word. Nothing is generated, only chosen.
+    </p>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="card" id="log"></div>
+      <form id="f" autocomplete="off">
+        <input type="text" id="msg" maxlength="300" placeholder="Say something…" required>
+        <button id="send" type="submit">Send</button>
+      </form>
+      <div class="chips">
+        <span class="chip">what is two plus two?</span>
+        <span class="chip">hey, what are you?</span>
+        <span class="chip">thanks for the help!</span>
+        <span class="chip">are you a real person?</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="panel-h">The search, live</div>
+      <div class="panel-b">
+        <div class="stat"><span>words considered</span><b id="s-vocab">—</b></div>
+        <div class="stat"><span>words written</span><b id="s-words">0</b></div>
+        <div class="stat"><span>API requests</span><b id="s-req">0</b></div>
+        <div class="stat"><span>input tokens</span><b id="s-tok">0</b></div>
+        <div class="stat"><span>elapsed</span><b id="s-sec">0.0s</b></div>
+        <div class="bars" id="bars"></div>
+        <div class="note" id="note">
+          The bars show the final round: one group winner per bar, with the probability Jev
+          assigned it. The green one was written.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <details>
+    <summary>Why a tournament, and not the binary search this started as</summary>
+    <div class="inner">
+      <p><b>Binary search over an alphabetical dictionary cannot work.</b> Measured, not
+      assumed: across a full 13-step search the model's answers sat between 0.39 and 0.48
+      at every single step. Thirteen coin flips, and the output was <code>accepting</code>.
+      The alphabet carries no meaning, so <i>is the next word before or after</i>
+      <code>melon</code> has no signal in it. Both halves contain every kind of word.
+      Sorting by word frequency roughly doubles the signal and still returns nonsense,
+      because rank 4000 and rank 4001 have nothing to do with each other either.</p>
+
+      <p><b>Character by character fails harder.</b> Asked for the next letter of
+      <code>The capital of France is Par</code>, Jev answers <code>a</code>. For
+      <code>Two plus two equals fou</code>, <code>e</code>. That is not a prompting
+      problem. Continuing a string of characters is exactly the generative task a judgment
+      model does not do.</p>
+
+      <p><b>What it is excellent at is choosing between candidate words on meaning.</b>
+      Asked which word best begins a reply to <i>thanks for your help</i>, it picks
+      <code>welcome</code> at 0.94 and puts <code>banana</code> at 0.00. So every question
+      here is a semantic one, and the dictionary is searched by elimination rather than by
+      bisection.</p>
+
+      <p>The one real constraint is the token budget. All {{ groups }} group questions ride
+      in a single request because System One evaluates questions in parallel and extra
+      questions are nearly free. Around 5,000 options is the ceiling; 10,000 returns
+      <code>max_tokens_exceeded</code>. That is why the vocabulary is the 5,000 most common
+      English words.</p>
+    </div>
+  </details>
+</div>
+
+<script>
+(function(){
+  var log=document.getElementById('log'), f=document.getElementById('f'),
+      msg=document.getElementById('msg'), send=document.getElementById('send'),
+      bars=document.getElementById('bars'), note=document.getElementById('note');
+  var turns=[], busy=false, req=0, tok=0, t0=0, timer=null;
+
+  document.querySelectorAll('.chip').forEach(function(c){
+    c.onclick=function(){ if(!busy){ msg.value=c.textContent; f.requestSubmit(); } };
+  });
+
+  function el(t,c,x){var e=document.createElement(t); if(c)e.className=c;
+    if(x!==undefined)e.textContent=x; return e;}
+  function turn(who,cls){
+    var d=el('div','turn '+cls); d.appendChild(el('div','who',who));
+    var s=el('div','said',''); d.appendChild(s); log.appendChild(d);
+    log.scrollTop=log.scrollHeight; return s;
+  }
+  function setStat(id,v){document.getElementById(id).textContent=v;}
+  function drawBars(list,winner){
+    bars.innerHTML='';
+    (list||[]).forEach(function(r){
+      var b=el('div','bar'+(r.word===winner?' won':''));
+      var l=el('div','lbl'); l.appendChild(el('span',null,r.word));
+      l.appendChild(el('span',null,(r.p*100).toFixed(0)+'%'));
+      var t=el('div','track'), fl=el('div','fill');
+      fl.style.width=Math.max(2,r.p*100)+'%'; t.appendChild(fl);
+      b.appendChild(l); b.appendChild(t); bars.appendChild(b);
+    });
+  }
+
+  f.onsubmit=function(e){
+    e.preventDefault();
+    if(busy) return;
+    var text=msg.value.trim(); if(!text) return;
+    msg.value=''; busy=true; send.disabled=true;
+    turn('you','you').textContent=text;
+    turns.push({speaker:'user',text:text});
+
+    var out=turn('jev','jev'), cur=el('span','cursor');
+    out.appendChild(cur);
+    req=0; tok=0; t0=Date.now(); bars.innerHTML='';
+    setStat('s-words','0'); setStat('s-req','0'); setStat('s-tok','0');
+    note.textContent='Searching the dictionary…';
+    clearInterval(timer);
+    timer=setInterval(function(){ setStat('s-sec',((Date.now()-t0)/1000).toFixed(1)+'s'); },100);
+
+    fetch('/api/reply',{method:'POST',headers:{'Content-Type':'application/json'},
+                        body:JSON.stringify({turns:turns})})
+    .then(function(r){
+      if(r.status===429||r.status===400){ return r.json().then(function(j){throw new Error(j.error);}); }
+      var reader=r.body.getReader(), dec=new TextDecoder(), buf='', words=0;
+      (function pump(){
+        return reader.read().then(function(res){
+          if(res.done){ finish(); return; }
+          buf+=dec.decode(res.value,{stream:true});
+          var parts=buf.split('\n\n'); buf=parts.pop();
+          parts.forEach(function(p){
+            var line=p.split('\n').filter(function(l){return l.indexOf('data: ')===0;})[0];
+            if(!line) return;
+            var d=JSON.parse(line.slice(6));
+            if(d.error){ out.textContent=d.error; out.className='said err'; return; }
+            if(d.done){ return; }
+            req+=d.requests||0; tok+=d.input_tokens||0;
+            setStat('s-vocab',(d.considered||0).toLocaleString());
+            setStat('s-req',req); setStat('s-tok',tok.toLocaleString());
+            if(d.reply!==undefined){
+              out.textContent=d.reply; out.appendChild(cur);
+              words=d.reply?d.reply.split(' ').length:0; setStat('s-words',words);
+            }
+            if(d.runners_up&&d.runners_up.length){ drawBars(d.runners_up,d.word); }
+            if(!d.stop&&d.word){
+              note.textContent='Wrote “'+d.word+'” with '+(d.confidence*100).toFixed(0)+
+                               '% confidence, after '+(d.finalists||[]).length+
+                               ' group winners competed.';
+            }
+            log.scrollTop=log.scrollHeight;
+          });
+          return pump();
+        });
+      })();
+    })
+    .catch(function(err){ out.textContent=err.message||'something went wrong';
+                          out.className='said err'; finish(); });
+
+    function finish(){
+      clearInterval(timer); if(cur.parentNode) cur.remove();
+      busy=false; send.disabled=false; msg.focus();
+      var said=out.textContent.trim();
+      if(said && out.className.indexOf('err')<0){ turns.push({speaker:'assistant',text:said}); }
+      else if(!said){ out.textContent='(the model chose to say nothing)'; }
+      note.textContent='Each bar is one group winner from the final round. Green was written.';
+    }
+  };
+})();
+</script>
+</body>
+</html>
