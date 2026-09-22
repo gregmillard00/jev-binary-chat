@@ -67,11 +67,33 @@ class EngineError(RuntimeError):
     """A failure worth showing a user, with nothing sensitive in it."""
 
 
+# THE WORD LIST IS A WEB FREQUENCY LIST, SO IT IS FULL OF THINGS THAT ARE NOT WORDS.
+#
+# google-10000-english is scraped, and its top 5,000 contains 194 one- and two-letter
+# tokens: bare initials (c, e, s, n, t, d, m, r), units and abbreviations (pm, uk, cd,
+# tv, pc), and fragments (nd, nt) left behind when "and" and "n't" were split. They are
+# frequent precisely because they are debris, so they win groups and land in replies -
+# "no im nt human", "helpful nd friendly". Filtering them is worth more to output
+# quality than any amount of prompt wording.
+#
+# Two- and one-letter words that ARE words are kept explicitly rather than by a rule,
+# because no rule separates "am" from "nd". Apostrophe-less contractions stay: the
+# vocabulary has no punctuation, so "im" and "ive" are the only way to say I'm and I've.
+KEEP_SHORT = {
+    "a", "i",
+    "am", "an", "as", "at", "be", "by", "do", "go", "he", "hi", "id", "if", "im", "in",
+    "is", "it", "me", "my", "no", "of", "oh", "ok", "on", "or", "so", "to", "up", "us",
+    "we", "ah", "ye",
+}
+
+
 def _load_vocab():
     with open(os.path.join(HERE, "data", "vocab.json")) as fh:
         data = json.load(fh)
     rank = data["rank"]
-    return sorted(data["words"], key=lambda w: rank[w])[:VOCAB_SIZE]
+    words = sorted(data["words"], key=lambda w: rank[w])
+    words = [w for w in words if len(w) > 2 or w in KEEP_SHORT]
+    return words[:VOCAB_SIZE]
 
 
 VOCAB = _load_vocab()
@@ -141,23 +163,75 @@ def next_word(conversation, reply_so_far, word_index):
 
     if len(ordered) == 1:
         winner, confidence, probabilities = ordered[0], finalists[ordered[0]], {}
+        grammar = {}
         t_round2 = 0.0
     else:
-        t0 = time.time()
-        final = _post(state, {"f": {"type": "choice", "instructions": INSTRUCTIONS,
-                                    "criteria": {w: None for w in ordered}}})["answers"]["f"]
-        t_round2 = time.time() - t0
-        winner = final["choice"]
-        confidence = final.get("confidence") or 0.0
-        probabilities = final.get("probabilities") or {}
+        # ROUND 2 ASKS TWO DIFFERENT QUESTIONS AND CODE COMBINES THEM.
+        #
+        # The Choice alone picks on meaning and produced "glad to helping anytime" and
+        # "im am assistant": the right idea in the wrong grammatical slot. Meaning and
+        # grammatical fit are independently useful dimensions, so they are asked
+        # separately and multiplied here rather than crammed into one question, which
+        # is the composite-scoring shape the API docs recommend - raw judgments stay
+        # reusable and the policy lives in code where it can be changed without
+        # re-running inference.
+        #
+        # It is nearly free: the Nouls ride in the SAME request as the Choice, and
+        # System One evaluates every question in a request in parallel.
+        questions2 = {"f": {"type": "choice", "instructions": INSTRUCTIONS,
+                            "criteria": {w: None for w in ordered}}}
+        for i, word in enumerate(ordered):
+            if word == STOP:
+                continue
+            questions2["fit%d" % i] = {"type": "noul", "instructions": {
+                "question": "Would `candidate` be grammatically correct as the very next "
+                            "word, appended directly to `reply_so_far`? Judge only "
+                            "grammar and fluency, not whether it is a good answer.",
+                "candidate": word,
+                "reply_so_far": reply_so_far or "(the reply has not started yet)"}}
 
-    top = sorted(probabilities.items(), key=lambda kv: -kv[1])[:8]
+        t0 = time.time()
+        second = _post(state, questions2)
+        t_round2 = time.time() - t0
+
+        final = second["answers"]["f"]
+        probabilities = final.get("probabilities") or {}
+        grammar = {}
+        for i, word in enumerate(ordered):
+            key = "fit%d" % i
+            grammar[word] = (1.0 if word == STOP
+                             else second["answers"][key]["noul"])
+
+        # Meaning times grammatical fit SQUARED. Neither factor alone may decide - a
+        # word nobody can parse here is not a candidate however apt, and a grammatical
+        # word nobody meant is not one either - but the exponent is not decoration.
+        #
+        # Measured at the branch that produced "i im am a an assistant": after "i", the
+        # grammar judgment is emphatic and correct (am 0.96, im 0.71) while meaning
+        # mildly prefers the wrong one (im 0.56, am 0.40). Multiplied once the wrong
+        # word wins by 0.398 to 0.384. Squared, the right one wins, and the whole
+        # sentence downstream stops being a repair job.
+        #
+        # This is a weight, so it lives in code. Changing it re-ranks existing judgments
+        # without re-running any inference.
+        scored = {w: (probabilities.get(w, 0.0) or 0.0) * grammar.get(w, 1.0) ** 2
+                  for w in ordered}
+        if max(scored.values(), default=0.0) <= 0.0:
+            scored = {w: grammar.get(w, 1.0) for w in ordered}
+        winner = max(scored, key=lambda w: scored[w])
+        confidence = round(scored[winner], 3)
+
+    combined = {w: (probabilities.get(w, 0.0) or 0.0) * grammar.get(w, 1.0) ** 2
+                for w in ordered} if len(ordered) > 1 else {}
+    top = sorted((combined or probabilities).items(), key=lambda kv: -kv[1])[:8]
     return {
         "word": winner,
         "stop": winner == STOP,
         "confidence": round(confidence, 3),
         "finalists": ordered[:20],
-        "runners_up": [{"word": w, "p": round(p, 3)} for w, p in top],
+        "runners_up": [{"word": w, "p": round(p, 3),
+                        "meaning": round(probabilities.get(w, 0.0) or 0.0, 3),
+                        "grammar": round(grammar.get(w, 1.0), 3)} for w, p in top],
         "considered": len(VOCAB),
         "requests": 1 if len(ordered) == 1 else 2,
         "seconds": round(t_round1 + t_round2, 2),

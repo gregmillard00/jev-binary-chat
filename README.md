@@ -97,12 +97,35 @@ templates/index.html   the page
 run.sh                 start/stop/status by port
 ```
 
+## The grammar gate
+
+Round 2 asks two different things and lets code combine them. Alongside the Choice,
+one Noul per finalist asks whether that word would be *grammatically* correct
+appended to the reply so far, judging fluency only and not aptness. They ride in the
+same request, so they are nearly free.
+
+The winner is `meaning x grammar^2`. The exponent is not decoration, and it was
+picked by measurement rather than taste. At the branch that produced
+`i im am a an assistant`, the grammar judgment after `i` is emphatic and correct
+(`am` 0.96, `im` 0.71) while meaning mildly prefers the wrong one (`im` 0.56,
+`am` 0.40). Multiplied once, the wrong word wins 0.398 to 0.384 and every later word
+is a repair job. Sweeping the exponent over five prompts:
+
+| prompt | x1 | x2 |
+|---|---|---|
+| thanks for the help! | `anytime again` | `you are welcome` |
+| hey, what are you? | `i am a an assistant helpful` | `hi im a assistant helpful` |
+| do you like music? | `i like music` | `i like music` |
+
+Because it is a weight in code rather than wording in a prompt, changing it re-ranks
+judgments already made without re-running any inference.
+
 ## Known rough edges
 
-- **Grammar wobbles.** "glad to helping anytime". Each word is chosen against the
-  reply so far, but nothing enforces agreement across the whole sentence. A second
-  Noul per candidate ("does this word fit grammatically here?") would help and
-  costs one extra question per word.
+- **Open questions ramble.** "what can you do?" gets `i can help you with things
+  including like some stuff and else`. The stop option is competing against 20 group
+  winners and rarely wins outright; a dedicated "is this reply complete?" Noul
+  weighted against it would read better than making it one option among many.
 - **It is slow by design.** Roughly 1.2s per word, so a ten-word reply takes twelve
   seconds. The words stream as they are decided, and watching the search is most of
   the point.
